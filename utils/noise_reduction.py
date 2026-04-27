@@ -1,80 +1,97 @@
-import os
+import logging
+
 import numpy as np
 import noisereduce as nr
-import matplotlib.pyplot as plt
 import soundfile as sf
 
 
-def normalize_audio(signal):
+# ─────────────────────────────────────────────
+#  NORMALISATION
+# ─────────────────────────────────────────────
+
+def normalize_audio(signal: np.ndarray) -> np.ndarray:
     """
     Normalise le signal entre -1 et 1.
+    Indispensable pour comparer des enregistrements
+    faits avec des micros ou des niveaux d'entrée différents.
     """
     max_val = np.max(np.abs(signal))
     if max_val == 0:
+        logging.warning("Signal silencieux détecté (amplitude nulle). Normalisation ignorée.")
         return signal
     return signal / max_val
 
 
-def reduce_background_noise(signal, sr, prop_decrease=0.4):
+# ─────────────────────────────────────────────
+#  RÉDUCTION DU BRUIT
+# ─────────────────────────────────────────────
+
+def reduce_background_noise(signal: np.ndarray, sr: int, prop_decrease: float = 0.4) -> np.ndarray:
     """
-    Réduit le bruit de fond.
-    prop_decrease plus faible = traitement moins agressif.
+    Réduit le bruit de fond ambiant du signal audio.
+
+    prop_decrease : intensité du traitement
+      - 0.0 → aucune réduction (signal intact)
+      - 0.4 → réduction modérée (recommandé pour audio moteur en extérieur)
+      - 1.0 → réduction maximale (risque d'artefacts sur le signal utile)
+
+    La valeur 0.4 est volontairement conservative : on préfère garder
+    un peu de bruit plutôt que de déformer les harmoniques du moteur.
     """
+    logging.debug(f"Réduction du bruit (prop_decrease={prop_decrease})")
     cleaned_signal = nr.reduce_noise(
         y=signal,
         sr=sr,
-        prop_decrease=prop_decrease
+        prop_decrease=prop_decrease,
     )
     return cleaned_signal
 
 
-def save_audio(signal, sr, output_path):
+# ─────────────────────────────────────────────
+#  UTILITAIRES OPTIONNELS (non utilisés dans le pipeline principal)
+# ─────────────────────────────────────────────
+
+def save_audio(signal: np.ndarray, sr: int, output_path: str) -> None:
     """
     Sauvegarde un signal audio dans un fichier WAV.
+    Utile pour inspecter manuellement un signal après prétraitement.
     """
     sf.write(output_path, signal, sr)
+    logging.info(f"Audio sauvegardé : {output_path}")
 
 
-def save_waveform_comparison(original_signal, normalized_signal, cleaned_signal, sr, output_path):
+def save_waveform_comparison(
+    original_signal: np.ndarray,
+    normalized_signal: np.ndarray,
+    cleaned_signal: np.ndarray,
+    sr: int,
+    output_path: str,
+) -> None:
     """
     Sauvegarde une image avec 3 formes d'onde :
     original / normalisé / nettoyé.
+    Utile pour déboguer visuellement le prétraitement.
+    Import matplotlib ici pour ne pas alourdir le pipeline si non utilisé.
     """
-    duration_original = len(original_signal) / sr
-    duration_normalized = len(normalized_signal) / sr
-    duration_cleaned = len(cleaned_signal) / sr
+    import matplotlib.pyplot as plt
 
-    time_original = np.linspace(0, duration_original, len(original_signal))
-    time_normalized = np.linspace(0, duration_normalized, len(normalized_signal))
-    time_cleaned = np.linspace(0, duration_cleaned, len(cleaned_signal))
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8))
 
-    plt.figure(figsize=(12, 8))
+    signals = [
+        (original_signal,   "Signal original"),
+        (normalized_signal, "Signal normalisé"),
+        (cleaned_signal,    "Signal après réduction du bruit"),
+    ]
 
-    plt.subplot(3, 1, 1)
-    plt.plot(time_original, original_signal)
-    plt.title("Signal original")
-    plt.xlabel("Temps (s)")
-    plt.ylabel("Amplitude")
-
-    plt.subplot(3, 1, 2)
-    plt.plot(time_normalized, normalized_signal)
-    plt.title("Signal normalisé")
-    plt.xlabel("Temps (s)")
-    plt.ylabel("Amplitude")
-
-    plt.subplot(3, 1, 3)
-    plt.plot(time_cleaned, cleaned_signal)
-    plt.title("Signal après réduction du bruit")
-    plt.xlabel("Temps (s)")
-    plt.ylabel("Amplitude")
+    for ax, (sig, title) in zip(axes, signals):
+        duration = len(sig) / sr
+        time     = np.linspace(0, duration, len(sig))
+        ax.plot(time, sig)
+        ax.set_title(title)
+        ax.set_xlabel("Temps (s)")
+        ax.set_ylabel("Amplitude")
 
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
-
-
-def ensure_results_dir(results_dir="results"):
-    """
-    Crée le dossier results s'il n'existe pas.
-    """
-    os.makedirs(results_dir, exist_ok=True)
+    logging.info(f"Graphe de formes d'onde sauvegardé : {output_path}")
